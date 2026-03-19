@@ -1,0 +1,97 @@
+name: Release
+
+permissions:
+  contents: write
+
+on:
+  workflow_dispatch:
+  push:
+    tags:
+      - "v*.*.*"
+
+jobs:
+  build_plugin:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Install pnpm
+        uses: pnpm/action-setup@v4
+        with:
+          version: 9
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+          cache: "pnpm"
+
+      - name: Install dependencies
+        run: pnpm install
+
+      - name: Build plugin
+        run: pnpm run build
+
+      - name: Create archives
+        run: |
+          temp_dir=$(mktemp -d)
+          temp_dir_zip=$(mktemp -d)
+
+          mkdir -p "$temp_dir/steam-deck-battery-tracker"
+          mkdir -p "$temp_dir_zip/steam-deck-battery-tracker"
+
+          cp -r dist py_modules "$temp_dir/steam-deck-battery-tracker"
+          cp main.py plugin.json package.json README.md LICENSE "$temp_dir/steam-deck-battery-tracker"
+
+          cp -rL dist py_modules "$temp_dir_zip/steam-deck-battery-tracker"
+          cp main.py plugin.json package.json README.md LICENSE "$temp_dir_zip/steam-deck-battery-tracker"
+
+          tar -czvf steam-deck-battery-tracker.tar.gz -C "$temp_dir" steam-deck-battery-tracker
+          (
+            cd "$temp_dir_zip"
+            zip -r "$OLDPWD/steam-deck-battery-tracker.zip" steam-deck-battery-tracker
+          )
+
+      - name: Show files
+        run: |
+          echo "=== tar.gz contents ==="
+          tar -tzvf steam-deck-battery-tracker.tar.gz | head -20
+          echo ""
+          echo "=== zip contents ==="
+          unzip -l steam-deck-battery-tracker.zip | head -20
+
+      - name: Upload artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: steam-deck-battery-tracker
+          path: |
+            steam-deck-battery-tracker.tar.gz
+            steam-deck-battery-tracker.zip
+
+  publish:
+    if: startsWith(github.ref, 'refs/tags/v')
+    runs-on: ubuntu-latest
+    needs: build_plugin
+    steps:
+      - run: mkdir /tmp/artifacts
+
+      - name: Download artifact
+        uses: actions/download-artifact@v4
+        with:
+          path: /tmp/artifacts
+
+      - run: ls -R /tmp/artifacts
+
+      - name: Publish to GitHub release
+        uses: softprops/action-gh-release@v2
+        with:
+          files: |
+            /tmp/artifacts/steam-deck-battery-tracker/steam-deck-battery-tracker.tar.gz
+            /tmp/artifacts/steam-deck-battery-tracker/steam-deck-battery-tracker.zip
+          tag_name: ${{ github.ref_name }}
+          draft: false
+          generate_release_notes: true
+          prerelease: contains(github.ref, 'pre') || contains(github.ref, '.rc')
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
